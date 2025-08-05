@@ -1,0 +1,64 @@
+services:
+  postgres_quito:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pg_quito
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: clinica
+    volumes:
+      - pg_quito_data:/var/lib/postgresql/data
+    networks:
+      - red_clinica
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "max_worker_processes=10"
+      - "-c"
+      - "shared_preload_libraries=pglogical"
+
+  postgres_guayaquil:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pg_guayaquil
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: clinica
+    volumes:
+      - pg_guayaquil_data:/var/lib/postgresql/data
+    networks:
+      - red_clinica
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "max_worker_processes=10"
+      - "-c"
+      - "shared_preload_libraries=pglogical"
+
+volumes:
+  pg_quito_data:
+  pg_guayaquil_data:
+
+networks:
+  red_clinica:
+    driver: bridge
