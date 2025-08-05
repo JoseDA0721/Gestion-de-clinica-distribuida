@@ -1,0 +1,15 @@
+meta {
+  name: Iniciar replicacion unidireccional desde cuenca
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://localhost:5000/api/replication/unidirectional/medicamentos
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+}

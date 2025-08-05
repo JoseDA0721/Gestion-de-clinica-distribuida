@@ -1,0 +1,19 @@
+meta {
+  name: Obtener fragmentos horizontales por nodo
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://localhost:5000/api/fragmentation/horizontal/:nodeName
+  body: none
+  auth: inherit
+}
+
+params:path {
+  nodeName: cuenca
+}
+
+settings {
+  encodeUrl: true
+}

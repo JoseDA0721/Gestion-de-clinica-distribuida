@@ -1,0 +1,20 @@
+meta {
+  name: OBTENER DATOS DE TABLA REPLICA POR NODO Y NOMBRE DE TABLA
+  type: http
+  seq: 7
+}
+
+get {
+  url: http://localhost:5000/api/replication/table-data/:nodeName/:tableName
+  body: none
+  auth: inherit
+}
+
+params:path {
+  tableName: medicamentos
+  nodeName: guayaquil
+}
+
+settings {
+  encodeUrl: true
+}

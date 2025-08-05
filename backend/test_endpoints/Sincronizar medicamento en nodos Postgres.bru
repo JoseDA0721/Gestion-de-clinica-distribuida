@@ -1,0 +1,19 @@
+meta {
+  name: Sincronizar medicamento en nodos Postgres
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://localhost:5000/api/replication/unidirectional/sync-medicamentos/:nodeName
+  body: none
+  auth: inherit
+}
+
+params:path {
+  nodeName: guayaquil
+}
+
+settings {
+  encodeUrl: true
+}
