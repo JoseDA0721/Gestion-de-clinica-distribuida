@@ -9,8 +9,12 @@ const dbPools = {
   cuenca: { pool: poolCuenca, type: 'sql', dbms: 'MS SQL Server' },
 };
 
-const getCount = async (nodeName, tableName) => {
-  const connection = dbPools[nodeName];
+const getCount = async (connection, tableName) => {
+  // Verificación para evitar el error si el objeto es undefined
+  console.log(connection.type + tableName);
+  if (!connection || !connection.type) {
+      throw new Error(`La conexión para la tabla ${tableName} es inválida.`);
+  }
   const query = `SELECT COUNT(*) as count FROM ${tableName}`;
   if (connection.type === 'pg') {
     const result = await connection.pool.query(query);
@@ -29,9 +33,10 @@ export const executeUnidirectionalReplication = async (req, res) => {
         logs.push("Iniciando proceso de replicación unidireccional...");
         
         // 1. Obtener conteos iniciales
-        const initialCountCuenca = await getCount('cuenca', tableName);
-        const initialCountQuito = await getCount('quito', tableName);
-        const initialCountGuayaquil = await getCount('guayaquil', tableName);
+        
+        const initialCountQuito = await getCount(dbPools['quito'], tableName);
+        const initialCountGuayaquil = await getCount(dbPools['guayaquil'], tableName);
+        const initialCountCuenca = await getCount(dbPools['cuenca'], tableName);
         logs.push(`> Estado inicial: Cuenca (${initialCountCuenca}), Quito (${initialCountQuito}), Guayaquil (${initialCountGuayaquil})`);
 
         // 2. Insertar 10 medicamentos en Cuenca
@@ -40,12 +45,13 @@ export const executeUnidirectionalReplication = async (req, res) => {
         let insertPromises = [];
         for (let i = 1; i <= 10; i++) {
             const request = dbPools.cuenca.pool.request();
-            request.input('medId', sql.Int, Date.now() + i);
+            const newMedId = initialCountCuenca + i;
+            request.input('medId', sql.Int, newMedId);
             request.input('nombreComercial', sql.VarChar, `Medicamento Demo ${i}`);
             insertPromises.push(request.query(insertQuery));
         }
         await Promise.all(insertPromises);
-        const postInsertCountCuenca = await getCount('cuenca', tableName);
+        const postInsertCountCuenca = await getCount(dbPools['cuenca'], tableName);
         logs.push(`-> Paso 1 completado. Registros en Cuenca: ${postInsertCountCuenca}`);
 
         // 3. Sincronizar en Quito
@@ -59,9 +65,9 @@ export const executeUnidirectionalReplication = async (req, res) => {
         logs.push(`-> Paso 3 completado. Nuevos registros en Guayaquil: ${guayaquilResult.rows[0].replicar_medicamentos}`);
 
         // 5. Obtener conteos finales
-        const finalCountCuenca = await getCount('cuenca', tableName);
-        const finalCountQuito = await getCount('quito', tableName);
-        const finalCountGuayaquil = await getCount('guayaquil', tableName);
+        const finalCountCuenca = await getCount(dbPools['cuenca'], tableName);
+        const finalCountQuito = await getCount(dbPools['quito'], tableName);
+        const finalCountGuayaquil = await getCount(dbPools['guayaquil'], tableName);
         logs.push(`> Estado final: Cuenca (${finalCountCuenca}), Quito (${finalCountQuito}), Guayaquil (${finalCountGuayaquil})`);
         logs.push("Proceso finalizado con éxito.");
 
@@ -88,25 +94,29 @@ export const executeBidirectionalReplication = async (req, res) => {
         
         // 1. Obtener conteos iniciales
         const initialCounts = {
-            quito: await getCount('quito', tableName),
-            guayaquil: await getCount('guayaquil', tableName),
-            cuenca: await getCount('cuenca', tableName),
+            quito: await getCount(dbPools['quito'], tableName),
+            guayaquil: await getCount(dbPools['guayaquil'], tableName),
+            cuenca: await getCount(dbPools['cuenca'], tableName),
         };
         logs.push(`> Estado inicial: Quito (${initialCounts.quito}), Guayaquil (${initialCounts.guayaquil}), Cuenca (${initialCounts.cuenca})`);
 
         // 2. Insertar 10 notas en el nodo de origen
         logs.push(`-> Paso 1: Insertando 10 notas en ${sourceNode}...`);
         if (sourceNode === 'cuenca') {
-            const query = `INSERT INTO ${tableName} (NotaID, Titulo, Contenido, NodoOrigen) VALUES (@notaId, @titulo, @contenido, 'Cuenca');`;
-            let promises = [];
-            for (let i = 1; i <= 10; i++) {
-                const request = dbPools.cuenca.pool.request();
-                request.input('notaId', sql.VarChar, `NC-${Date.now() + i}`);
-                request.input('titulo', sql.VarChar, `Nota desde Cuenca #${i}`);
-                request.input('contenido', sql.VarChar, `Contenido de prueba`);
-                promises.push(request.query(query));
-            }
-            await Promise.all(promises);
+          const query = `INSERT INTO ${tableName}
+            (NotaID, Titulo, Contenido, FechaCreacion, NodoOrigen)
+            VALUES (@notaId, @titulo, @contenido, @fechaCreacion, 'Cuenca');`;
+          const promises = [];
+          for (let i = 1; i <= 10; i++) {
+            const pad = i.toString().padStart(3, '0');      // "001", "002", …
+            const req = dbPools.cuenca.pool.request();
+              req.input('notaId',       sql.VarChar(5), `NC${pad}`);
+              req.input('titulo',       sql.VarChar(100), `Nota desde Cuenca #${i}`);
+              req.input('contenido',    sql.VarChar(200), `Contenido generado en Cuenca #${i}`);
+              req.input('fechaCreacion',sql.DateTime,     new Date());
+              promises.push(req.query(query));
+          }
+          await Promise.all(promises);
         } else { // quito o guayaquil
             const sequenceName = `seq_notas_${sourceNode}`;
             const idPrefix = sourceNode === 'quito' ? 'NQ' : 'NG';
@@ -123,16 +133,49 @@ export const executeBidirectionalReplication = async (req, res) => {
             await dbPools.guayaquil.pool.query('SELECT replicar_notas_desde_cuenca();');
             logs.push("-> Paso 2 completado. Funciones de replicación ejecutadas en Quito y Guayaquil.");
         } else { // quito o guayaquil
-            const jobName = `ReplicarNotasDesdePostgres`;
-            await dbPools.cuenca.pool.request().input('job_name', sql.VarChar, jobName).execute('msdb.dbo.sp_start_job');
-            logs.push(`-> Paso 2 completado. Job '${jobName}' ejecutado en SQL Server.`);
+          // 1) Obtén el job_id desde el nombre
+          const jobName = `ReplicarNotasDesdePostgres`;
+          const jobInfo = await dbPools.cuenca.pool
+            .request()
+            .input('job_name', sql.VarChar, jobName)
+            .query(`
+              SELECT job_id 
+                FROM msdb.dbo.sysjobs 
+              WHERE name = @job_name;
+            `);
+
+          const jobId = jobInfo.recordset[0]?.job_id;
+          if (jobId) {
+            // 2) Comprueba si hay una instancia en ejecución
+            const status = await dbPools.cuenca.pool
+              .request()
+              .input('job_id', sql.UniqueIdentifier, jobId)
+              .query(`
+                SELECT 1 AS is_running
+                  FROM msdb.dbo.sysjobactivity ja
+                WHERE ja.job_id = @job_id
+                  AND ja.start_execution_date IS NOT NULL
+                  AND ja.stop_execution_date  IS NULL;
+            `);
+
+            if (status.recordset.length === 0) {
+              // No está corriendo: podemos arrancarlo
+              await dbPools.cuenca.pool
+                .request()
+                .input('job_name', sql.VarChar, jobName)
+                .execute('msdb.dbo.sp_start_job');
+              logs.push(`-> Job '${jobName}' arrancado en SQL Server.`);
+            } else {
+              logs.push(`-> El job '${jobName}' ya está en ejecución. Se omite.`);
+            }
+          }
         }
 
         // 4. Obtener conteos finales
         const finalCounts = {
-            quito: await getCount('quito', tableName),
-            guayaquil: await getCount('guayaquil', tableName),
-            cuenca: await getCount('cuenca', tableName),
+            quito: await getCount(dbPools['quito'], tableName),
+            guayaquil: await getCount(dbPools['guayaquil'], tableName),
+            cuenca: await getCount(dbPools['cuenca'], tableName),
         };
         logs.push(`> Estado final: Quito (${finalCounts.quito}), Guayaquil (${finalCounts.guayaquil}), Cuenca (${finalCounts.cuenca})`);
         logs.push("Proceso finalizado con éxito.");

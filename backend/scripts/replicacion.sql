@@ -136,18 +136,17 @@ $$ LANGUAGE plpgsql;
 SELECT replicar_notas_a_cuenca();
 
 -- Funcion de replicacion desde cuenca
-CREATE OR REPLACE FUNCTION replicar_notas_desde_cuenca()
+CREATE OR REPLACE FUNCTION replicar_medicamentos()
 RETURNS void AS $$
 BEGIN
-  INSERT INTO NotasInformativas (NotaID, Titulo, Contenido, FechaCreacion, NodoOrigen)
-  SELECT r.NotaID, r.Titulo, r.Contenido, r.FechaCreacion, r.NodoOrigen
-  FROM notas_informativas_sqlserver r
-  LEFT JOIN NotasInformativas n ON n.NotaID = r.NotaID
-  WHERE n.NotaID IS NULL;
+    INSERT INTO medicamentos
+    SELECT *
+    FROM medicamentos_remoto
+    ON CONFLICT (MedicamentoID) DO NOTHING;
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT replicar_notas_desde_cuenca();
+SELECT replicar_medicamentos();
 
 -- ========================================
 -- 🪪 2. Crear el nodo pglogical en cada servidor

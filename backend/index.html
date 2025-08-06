@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Sistema Distribuido</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .table-container { max-height: 300px; overflow-y: auto; }
+        .card { background-color: white; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
+        .btn { transition: all 0.2s ease; }
+        .node-section { border: 2px dashed #cbd5e1; border-radius: 1rem; padding: 2rem; margin-top: 3rem; }
+        .log-console { background-color: #1f2937; color: #d1d5db; font-family: monospace; padding: 1rem; border-radius: 0.5rem; height: 250px; overflow-y: auto; font-size: 0.875rem; white-space: pre-wrap; }
+        #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 1rem 2rem; border-radius: 0.5rem; color: white; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.5s, visibility 0.5s; }
+        #toast.show { opacity: 1; visibility: visible; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="mb-8">
+            <div class="text-center">
+                <h1 class="text-4xl font-bold text-gray-800 mb-2">Dashboard de Sistema Distribuido</h1>
+                <p class="text-lg text-gray-600">Demostración de Fragmentación y Replicación</p>
+            </div>
+            <!-- Selector de Nodo (Ahora es estático y siempre visible) -->
+            <div class="mt-6 max-w-sm mx-auto">
+                <label for="node-selector" class="block text-sm font-medium text-gray-700 mb-2">Seleccionar Vista:</label>
+                <select id="node-selector" class="w-full p-2 border border-gray-300 rounded-lg shadow-sm text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                    <option value="dashboard" selected>Ver Dashboard General</option>
+                    <option value="quito">Ver Detalles de Sede Quito</option>
+                    <option value="guayaquil">Ver Detalles de Sede Guayaquil</option>
+                    <option value="cuenca">Ver Detalles de Sede Cuenca</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- Contenedor para el Dashboard Inicial -->
+        <div id="view-dashboard" class="node-section bg-white">
+            <!-- El contenido se cargará con JS -->
+        </div>
+
+        <!-- Contenedor para la Vista del Nodo Quito -->
+        <div id="view-quito" class="node-section hidden">
+             <!-- El contenido se cargará con JS -->
+        </div>
+        
+        <!-- Contenedor para la Vista del Nodo Guayaquil -->
+        <div id="view-guayaquil" class="node-section hidden">
+             <!-- El contenido se cargará con JS -->
+        </div>
+
+        <!-- Contenedor para la Vista del Nodo Cuenca -->
+        <div id="view-cuenca" class="node-section hidden">
+             <!-- El contenido se cargará con JS -->
+        </div>
+    </div>
+
+    <!-- Toast para notificaciones -->
+    <div id="toast"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const API_BASE_URL = 'http://localhost:5000/api';
+            const toast = document.getElementById('toast');
+            const nodeSelector = document.getElementById('node-selector');
+            
+            // --- LÓGICA DE NAVEGACIÓN ---
+            const views = ['dashboard', 'quito', 'guayaquil', 'cuenca'];
+            
+            const showView = (viewId) => {
+                views.forEach(v => {
+                    const el = document.getElementById(`view-${v}`);
+                    if (el) el.classList.toggle('hidden', v !== viewId);
+                });
+                
+                if (viewId === 'dashboard') {
+                    renderDashboard();
+                } else {
+                    renderNodeView(viewId);
+                }
+            };
+            
+            // --- FUNCIONES DE RENDERIZADO ---
+            const showToast = (message, isError = false) => {
+                toast.textContent = message;
+                toast.style.backgroundColor = isError ? '#ef4444' : '#22c55e';
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 4000);
+            };
+
+            const renderTable = (data, title = '') => {
+                if (!data || data.length === 0) return `<div class="card p-4"><h4 class="font-semibold mb-2">${title}</h4><p class="text-center text-sm text-gray-500 mt-2">No hay registros.</p></div>`;
+                const headers = Object.keys(data[0]);
+                return `
+                    <div class="card p-4">
+                        ${title ? `<h4 class="font-semibold mb-2">${title}</h4>` : ''}
+                        <div class="table-container border border-gray-200 rounded-lg">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50"><tr>${headers.map(h => `<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${h}</th>`).join('')}</tr></thead>
+                                <tbody class="bg-white divide-y divide-gray-200">${data.map(row => `<tr>${headers.map(h => `<td class="px-4 py-2 whitespace-nowrap text-sm text-gray-700">${row[h] === null ? 'NULL' : String(row[h])}</td>`).join('')}</tr>`).join('')}</tbody>
+                            </table>
+                        </div>
+                    </div>`;
+            };
+
+            const renderLogs = (logs) => logs.join('\n');
+
+            // --- RENDERIZADO DE VISTAS ---
+            const renderDashboard = async () => {
+                const container = document.getElementById('view-dashboard');
+                container.innerHTML = `<p class="text-center">Cargando Dashboard...</p>`;
+                try {
+                    const response = await fetch(`${API_BASE_URL}/dashboard/summary`);
+                    if (!response.ok) throw new Error('No se pudo cargar el resumen del dashboard. Asegúrate de que el backend esté corriendo y CORS esté habilitado.');
+                    const summary = await response.json();
+
+                    container.innerHTML = `
+                        <h2 class="text-3xl font-bold text-center text-gray-700 mb-8">Dashboard General del Sistema</h2>
+                        <main>
+                            <section class="mb-12">
+                                <h3 class="text-2xl font-semibold mb-4">Estado de los Nodos</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    ${summary.nodes.map(node => `
+                                        <div class="card p-4">
+                                            <p class="font-bold text-lg">${node.name}</p>
+                                            <p class="text-sm text-gray-500">${node.dbms}</p>
+                                            <div class="mt-4">
+                                                <p class="text-xs text-gray-600">IP: ${node.ip}</p>
+                                                <div class="flex items-center mt-1">
+                                                    <span class="inline-block w-3 h-3 ${node.status === 'En línea' ? 'bg-green-500' : 'bg-red-500'} rounded-full mr-2"></span>
+                                                    <span>${node.status}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </section>
+                            <section>
+                                <h3 class="text-2xl font-semibold mb-4">Resumen Global de Replicación</h3>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div class="card p-4 text-center"><p class="text-sm text-gray-500">Medicamentos (Origen)</p><p class="text-3xl font-bold mt-1">${summary.globalSummary.medicamentosCount}</p></div>
+                                    <div class="card p-4 text-center"><p class="text-sm text-gray-500">Notas Totales</p><p class="text-3xl font-bold mt-1">${summary.globalSummary.notasInformativasCount}</p></div>
+                                </div>
+                            </section>
+                        </main>`;
+                } catch (e) {
+                    container.innerHTML = `<p class="text-center text-red-500">${e.message}</p>`;
+                }
+            };
+
+            const renderNodeView = (nodeName) => {
+                const container = document.getElementById(`view-${nodeName}`);
+                const capitalizedNodeName = nodeName.charAt(0).toUpperCase() + nodeName.slice(1);
+                const colors = { quito: 'green', guayaquil: 'blue', cuenca: 'red' };
+                const color = colors[nodeName];
+                const dbms = nodeName === 'cuenca' ? 'MS SQL Server' : 'PostgreSQL';
+                
+                container.innerHTML = `
+                    <h2 class="text-3xl font-bold text-center text-${color}-600 mb-8">Vista: Nodo ${capitalizedNodeName}</h2>
+                    <main>
+                        <div class="mb-8 p-4 border-l-4 border-${color}-500 bg-${color}-50 rounded-lg">
+                            <h2 class="text-2xl font-bold text-${color}-800">Nodo Activo: ${capitalizedNodeName}</h2>
+                            <p class="text-md text-${color}-700 mt-1"><strong>DBMS:</strong> ${dbms}</p>
+                        </div>
+                        <section class="mb-12">
+                            <div class="flex justify-between items-center mb-6 border-b pb-2">
+                                <h3 class="text-3xl font-semibold">Fragmentación</h3>
+                                <div class="space-x-2">
+                                    <button class="btn bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm" data-action="demo-horizontal" data-node="${nodeName}">Ejecutar Demo Horizontal</button>
+                                    <button class="btn bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm" data-action="demo-vertical" data-node="${nodeName}">Ejecutar Demo Vertical</button>
+                                </div>
+                            </div>
+                            <div class="mt-4 card p-4 bg-gray-50 min-h-[200px]" data-container="fragmentation-log">
+                                <p class="text-center text-gray-400 text-sm p-4">Aquí se mostrarán los logs de la demostración de fragmentación.</p>
+                            </div>
+                        </section>
+                        <section>
+                            <h3 class="text-3xl font-semibold mb-6 border-b pb-2">Replicación</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div class="md:col-span-2" data-container="replication-status">
+                                    <!-- Estado de replicación se carga aquí -->
+                                </div>
+                                <div>
+                                    <h4 class="text-xl font-semibold mb-4">Acciones</h4>
+                                    <div class="card p-4 space-y-4">
+                                        <div ${nodeName !== 'cuenca' ? 'hidden' : ''}><h5 class="font-semibold text-sm mb-2">Replicación Unidireccional</h5><button class="btn bg-blue-500 text-white px-4 py-2 rounded-lg shadow w-full" data-action="repl-unidirectional">Ejecutar Proceso Completo</button></div>
+                                        <div><h5 class="font-semibold text-sm mb-2">Replicación Bidireccional</h5><button class="btn bg-purple-500 text-white px-4 py-2 rounded-lg shadow w-full" data-action="repl-bidirectional" data-node="${nodeName}">Ejecutar Proceso Completo</button></div>
+                                        <div class="log-console" data-container="replication-log"><p>&gt; Esperando acción...</p></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </main>`;
+                updateReplicationStatus(nodeName);
+            };
+
+            const updateReplicationStatus = async (nodeName) => {
+                const container = document.querySelector(`#view-${nodeName} [data-container="replication-status"]`);
+                if (!container) return;
+                try {
+                    const response = await fetch(`${API_BASE_URL}/replication/status/${nodeName}`);
+                    const status = await response.json();
+                    container.innerHTML = `
+                        <h4 class="text-xl font-semibold mb-4">Estado de Tablas Replicadas</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            ${Object.entries(status.counts).map(([tableName, count]) => `
+                                <div class="card p-4 text-center">
+                                    <p class="font-bold text-lg">${tableName}</p>
+                                    <p class="text-4xl font-bold mt-2">${count}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <div class="mt-6">
+                            <h5 class="font-semibold text-sm mb-2">Ver Datos de Tablas</h5>
+                            <div class="flex space-x-2">
+                                <button class="btn bg-white border border-gray-300 text-gray-800 px-4 py-2 rounded-lg shadow-sm w-full" data-action="view-table" data-node="${nodeName}" data-table="Medicamentos">Ver Medicamentos</button>
+                                <button class="btn bg-white border border-gray-300 text-gray-800 px-4 py-2 rounded-lg shadow-sm w-full" data-action="view-table" data-node="${nodeName}" data-table="NotasInformativas">Ver NotasInformativas</button>
+                            </div>
+                            <div class="mt-4 card p-2 bg-gray-50 min-h-[100px]" data-container="table-view"><p class="text-center text-gray-400 text-sm p-4">Aquí se mostrarán los datos de la tabla seleccionada.</p></div>
+                        </div>`;
+                } catch (e) {
+                    container.innerHTML = `<p class="text-red-500">Error al cargar estado.</p>`;
+                }
+            };
+            
+            // --- MANEJADORES DE EVENTOS ---
+            document.body.addEventListener('click', async (e) => {
+                const { action, node, table } = e.target.dataset;
+                if (!action) return;
+
+                let endpoint = '';
+                let logContainer;
+                
+                switch (action) {
+                    case 'demo-horizontal':
+                        endpoint = `${API_BASE_URL}/fragmentation-demo/horizontal-demo/${node}`;
+                        logContainer = document.querySelector(`#view-${node} [data-container="fragmentation-log"]`);
+                        console.log(endpoint);
+                        break;
+                    case 'demo-vertical':
+                        endpoint = `${API_BASE_URL}/fragmentation-demo/vertical-demo/${node}`;
+                        logContainer = document.querySelector(`#view-${node} [data-container="fragmentation-log"]`);
+                        break;
+                    case 'repl-unidirectional':
+                        endpoint = `${API_BASE_URL}/replication/unidirectional/execute-full-process`;
+                        logContainer = document.querySelector(`#view-cuenca [data-container="replication-log"]`);
+                        break;
+                    case 'repl-bidirectional':
+                        endpoint = `${API_BASE_URL}/replication/bidirectional/execute-full-process/${node}`;
+                        logContainer = document.querySelector(`#view-${node} [data-container="replication-log"]`);
+                        break;
+                    case 'view-table':
+                        const tableContainer = document.querySelector(`#view-${node} [data-container="table-view"]`);
+                        tableContainer.innerHTML = `<p>Cargando datos de ${table}...</p>`;
+                        try {
+                            const response = await fetch(`${API_BASE_URL}/replication/table-data/${node}/${table}`);
+                            const result = await response.json();
+                             if (!response.ok) throw new Error(result.message);
+                            tableContainer.innerHTML = renderTable(result.data, `Datos de ${table}`);
+                        } catch (err) {
+                            tableContainer.innerHTML = `<p class="text-red-500">${err.message}</p>`;
+                        }
+                        return; 
+                }
+
+                if (endpoint && logContainer) {
+                    logContainer.innerHTML = '<div class="log-console"><p>Ejecutando proceso...</p></div>';
+                    try {
+                        console.log("Hola",endpoint);
+                        const response = await fetch(endpoint, { method: 'POST' });
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.message || 'Error en el servidor');
+                        
+                        logContainer.innerHTML = `<div class="log-console">${renderLogs(result.logs)}</div>`;
+                        if (result.reconstructedData) {
+                            logContainer.innerHTML += '<h4>Datos Reconstruidos:</h4>' + renderTable([result.reconstructedData]);
+                        }
+                        showToast('Proceso de demostración completado.');
+                        
+                        renderDashboard();
+                        views.forEach(v => { if(v !== 'dashboard') updateReplicationStatus(v); });
+
+                    } catch (err) {
+                        logContainer.innerHTML = `<div class="log-console"><p class="text-red-500">${err.message}</p></div>`;
+                        showToast(err.message, true);
+                    }
+                }
+            });
+
+            // --- INICIALIZACIÓN ---
+            nodeSelector.addEventListener('change', (e) => showView(e.target.value));
+            
+            renderDashboard();
+        });
+    </script>
+</body>
+</html>
