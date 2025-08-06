@@ -9,8 +9,8 @@ const dbPools = {
   cuenca: { pool: poolCuenca, type: 'sql', dbms: 'MS SQL Server' },
 };
 
-// --- Función Auxiliar para obtener conteos ---
-const getCount = async (connection, tableName) => {
+const getCount = async (nodeName, tableName) => {
+  const connection = dbPools[nodeName];
   const query = `SELECT COUNT(*) as count FROM ${tableName}`;
   if (connection.type === 'pg') {
     const result = await connection.pool.query(query);
@@ -21,185 +21,130 @@ const getCount = async (connection, tableName) => {
   }
 };
 
-// --- CONTROLADORES ---
+export const executeUnidirectionalReplication = async (req, res) => {
+    const logs = [];
+    const tableName = 'Medicamentos';
 
-/**
- * REPLICACIÓN UNIDIRECCIONAL: Inserta 10 medicamentos en Cuenca (SQL Server)
- */
-export const replicateMedicamentos = async (req, res) => {
-  const sourceNode = 'cuenca';
-  const sourceDB = dbPools[sourceNode];
-  const tableName = 'Medicamentos';
+    try {
+        logs.push("Iniciando proceso de replicación unidireccional...");
+        
+        // 1. Obtener conteos iniciales
+        const initialCountCuenca = await getCount('cuenca', tableName);
+        const initialCountQuito = await getCount('quito', tableName);
+        const initialCountGuayaquil = await getCount('guayaquil', tableName);
+        logs.push(`> Estado inicial: Cuenca (${initialCountCuenca}), Quito (${initialCountQuito}), Guayaquil (${initialCountGuayaquil})`);
 
-  if (!sourceDB) {
-    return res.status(400).json({ message: "El nodo 'cuenca' no está configurado." });
-  }
+        // 2. Insertar 10 medicamentos en Cuenca
+        logs.push("-> Paso 1: Insertando 10 registros en el nodo origen (Cuenca)...");
+        const insertQuery = `INSERT INTO ${tableName} (MedicamentoID, NombreComercial, Fabricante, FechaCreacion) VALUES (@medId, @nombreComercial, 'Farmacéutica CUE', GETDATE());`;
+        let insertPromises = [];
+        for (let i = 1; i <= 10; i++) {
+            const request = dbPools.cuenca.pool.request();
+            request.input('medId', sql.Int, Date.now() + i);
+            request.input('nombreComercial', sql.VarChar, `Medicamento Demo ${i}`);
+            insertPromises.push(request.query(insertQuery));
+        }
+        await Promise.all(insertPromises);
+        const postInsertCountCuenca = await getCount('cuenca', tableName);
+        logs.push(`-> Paso 1 completado. Registros en Cuenca: ${postInsertCountCuenca}`);
 
-  try {
-    const initialCount = await getCount(sourceDB, tableName);
-    
-    const query = `
-      INSERT INTO ${tableName} (
-        MedicamentoID, NombreComercial, NombreGenerico, PrincipioActivo, 
-        Fabricante, FormaFarmaceutica, FechaCreacion
-      ) VALUES (
-        @medId, @nombreComercial, @nombreGenerico, @principioActivo, 
-        @fabricante, @forma, GETDATE()
-      );
-    `;
+        // 3. Sincronizar en Quito
+        logs.push("-> Paso 2: Sincronizando datos hacia Quito...");
+        const quitoResult = await dbPools.quito.pool.query('SELECT replicar_medicamentos();');
+        logs.push(`-> Paso 2 completado. Nuevos registros en Quito: ${quitoResult.rows[0].replicar_medicamentos}`);
+        
+        // 4. Sincronizar en Guayaquil
+        logs.push("-> Paso 3: Sincronizando datos hacia Guayaquil...");
+        const guayaquilResult = await dbPools.guayaquil.pool.query('SELECT replicar_medicamentos();');
+        logs.push(`-> Paso 3 completado. Nuevos registros en Guayaquil: ${guayaquilResult.rows[0].replicar_medicamentos}`);
 
-    // 3. Ejecutamos la inserción 10 veces, cada una con sus propios datos
-    let insertPromises = [];
-    for (let i = 1; i <= 10; i++) {
-      const request = sourceDB.pool.request();
+        // 5. Obtener conteos finales
+        const finalCountCuenca = await getCount('cuenca', tableName);
+        const finalCountQuito = await getCount('quito', tableName);
+        const finalCountGuayaquil = await getCount('guayaquil', tableName);
+        logs.push(`> Estado final: Cuenca (${finalCountCuenca}), Quito (${finalCountQuito}), Guayaquil (${finalCountGuayaquil})`);
+        logs.push("Proceso finalizado con éxito.");
 
-      // Asignamos un valor a cada parámetro de la consulta
-      request.input('medId', sql.Int, i);
-      request.input('nombreComercial', sql.VarChar, `Medicamento_C${i}`);
-      request.input('nombreGenerico', sql.VarChar, `Genérico_${i}`);
-      request.input('principioActivo', sql.VarChar, 'Paracetamol');
-      request.input('fabricante', sql.VarChar, 'Farmacéutica CUE');
-      request.input('forma', sql.VarChar, 'Tableta');
+        res.json({ logs });
 
-      // Añadimos la promesa de la ejecución a nuestro arreglo
-      insertPromises.push(request.query(query));
+    } catch (error) {
+        logs.push(`ERROR: ${error.message}`);
+        res.status(500).json({ logs, message: `Error en el proceso: ${error.message}` });
+    }
+};
+
+
+export const executeBidirectionalReplication = async (req, res) => {
+    const { sourceNode } = req.params;
+    const logs = [];
+    const tableName = 'NotasInformativas';
+
+    if (!dbPools[sourceNode]) {
+        return res.status(400).json({ message: "Nodo de origen no válido." });
     }
 
-    // Esperamos a que todas las 10 inserciones se completen
-    await Promise.all(insertPromises);
+    try {
+        logs.push(`Iniciando proceso de replicación bidireccional desde ${sourceNode}...`);
+        
+        // 1. Obtener conteos iniciales
+        const initialCounts = {
+            quito: await getCount('quito', tableName),
+            guayaquil: await getCount('guayaquil', tableName),
+            cuenca: await getCount('cuenca', tableName),
+        };
+        logs.push(`> Estado inicial: Quito (${initialCounts.quito}), Guayaquil (${initialCounts.guayaquil}), Cuenca (${initialCounts.cuenca})`);
 
-    // 4. Obtenemos el conteo final para la demostración
-    const finalCount = await getCount(sourceDB, tableName);
+        // 2. Insertar 10 notas en el nodo de origen
+        logs.push(`-> Paso 1: Insertando 10 notas en ${sourceNode}...`);
+        if (sourceNode === 'cuenca') {
+            const query = `INSERT INTO ${tableName} (NotaID, Titulo, Contenido, NodoOrigen) VALUES (@notaId, @titulo, @contenido, 'Cuenca');`;
+            let promises = [];
+            for (let i = 1; i <= 10; i++) {
+                const request = dbPools.cuenca.pool.request();
+                request.input('notaId', sql.VarChar, `NC-${Date.now() + i}`);
+                request.input('titulo', sql.VarChar, `Nota desde Cuenca #${i}`);
+                request.input('contenido', sql.VarChar, `Contenido de prueba`);
+                promises.push(request.query(query));
+            }
+            await Promise.all(promises);
+        } else { // quito o guayaquil
+            const sequenceName = `seq_notas_${sourceNode}`;
+            const idPrefix = sourceNode === 'quito' ? 'NQ' : 'NG';
+            const nodeOriginName = sourceNode.charAt(0).toUpperCase() + sourceNode.slice(1);
+            const query = `DO $$ BEGIN FOR i IN 1..10 LOOP INSERT INTO ${tableName} (NotaID, Titulo, Contenido, NodoOrigen) VALUES ('${idPrefix}' || LPAD(nextval('${sequenceName}')::TEXT, 3, '0'), 'Nota desde ${nodeOriginName} #' || i, 'Contenido de prueba', '${nodeOriginName}'); END LOOP; END $$;`;
+            await dbPools[sourceNode].pool.query(query);
+        }
+        logs.push(`-> Paso 1 completado. 10 notas insertadas en ${sourceNode}.`);
 
-    res.json({
-      message: `Replicación unidireccional para ${tableName} iniciada desde ${sourceNode}.`,
-      table: tableName,
-      initialCount,
-      insertedRecords: 10,
-      finalCount,
-      status: `Se insertaron 10 registros en ${sourceNode}. Por favor, verifica la replicación en los nodos secundarios.`
-    });
+        // 3. Invocar mecanismo de replicación
+        logs.push("-> Paso 2: Invocando mecanismo de sincronización...");
+        if (sourceNode === 'cuenca') {
+            await dbPools.quito.pool.query('SELECT replicar_notas_desde_cuenca();');
+            await dbPools.guayaquil.pool.query('SELECT replicar_notas_desde_cuenca();');
+            logs.push("-> Paso 2 completado. Funciones de replicación ejecutadas en Quito y Guayaquil.");
+        } else { // quito o guayaquil
+            const jobName = `ReplicarNotasDesdePostgres`;
+            await dbPools.cuenca.pool.request().input('job_name', sql.VarChar, jobName).execute('msdb.dbo.sp_start_job');
+            logs.push(`-> Paso 2 completado. Job '${jobName}' ejecutado en SQL Server.`);
+        }
 
-  } catch (error) {
-    res.status(500).json({ message: `Error durante la replicación de ${tableName}`, error: error.message });
-  }
+        // 4. Obtener conteos finales
+        const finalCounts = {
+            quito: await getCount('quito', tableName),
+            guayaquil: await getCount('guayaquil', tableName),
+            cuenca: await getCount('cuenca', tableName),
+        };
+        logs.push(`> Estado final: Quito (${finalCounts.quito}), Guayaquil (${finalCounts.guayaquil}), Cuenca (${finalCounts.cuenca})`);
+        logs.push("Proceso finalizado con éxito.");
+
+        res.json({ logs });
+
+    } catch (error) {
+        logs.push(`ERROR: ${error.message}`);
+        res.status(500).json({ logs, message: `Error en el proceso: ${error.message}` });
+    }
 };
 
-/**
- * ACCIÓN 2: Sincroniza los medicamentos desde un nodo PostgreSQL.
- * Esta función llama a la lógica que usa tu Foreign Table.
- */
-export const syncMedicamentosEnNodosPostgres = async (req, res) => {
-  const { nodeName } = req.params; // 'quito' o 'guayaquil'
-  const targetDB = dbPools[nodeName];
-
-  if (targetDB?.type !== 'pg') {
-    return res.status(400).json({ message: "Esta acción solo puede ejecutarse desde un nodo PostgreSQL." });
-  }
-
-  try {
-    // Esta consulta es la implementación de tu lógica de replicación unidireccional
-    const syncQuery = `
-      INSERT INTO Medicamentos (MedicamentoID, NombreComercial, NombreGenerico, PrincipioActivo, Fabricante, FormaFarmaceutica, FechaCreacion)
-      SELECT r.MedicamentoID, r.NombreComercial, r.NombreGenerico, r.PrincipioActivo, r.Fabricante, r.FormaFarmaceutica, r.FechaCreacion
-      FROM medicamentos_remoto r
-      LEFT JOIN Medicamentos l ON r.MedicamentoID = l.MedicamentoID
-      WHERE l.MedicamentoID IS NULL;
-    `;
-    
-    const result = await targetDB.pool.query(syncQuery);
-
-    res.json({
-      message: `Sincronización completada en el nodo ${nodeName}.`,
-      newRecordsSynced: result.rowCount // Número de filas nuevas insertadas
-    });
-
-  } catch (error) {
-    res.status(500).json({ message: `Error durante la sincronización de medicamentos`, error: error.message });
-  }
-};
-
-/**
- * Inserta 10 notas informativas en un nodo de origen.
- */
-export const replicateNotaInformativa = async (req, res) => {
-  const { sourceNode } = req.params;
-  const sourceDB = dbPools[sourceNode];
-  const tableName = 'NotasInformativas';
-
-  if (!sourceDB) {
-      return res.status(400).json({ message: "Nodo de origen no válido." });
-  }
-
-  try {
-      if (sourceNode === 'cuenca') {
-          // --- Lógica para SQL Server (Cuenca) ---
-          const query = `
-              INSERT INTO ${tableName} (NotaID, Titulo, Contenido, FechaCreacion, NodoOrigen)
-              VALUES (@notaId, @titulo, @contenido, GETDATE(), 'Cuenca');
-          `;
-          let insertPromises = [];
-          for (let i = 1; i <= 10; i++) {
-              const request = sourceDB.pool.request();
-              const notaId = 'NC' + String(i).padStart(3, '0');
-              request.input('notaId', sql.VarChar, notaId);
-              request.input('titulo', sql.VarChar, `Nota desde Cuenca #${i}`);
-              request.input('contenido', sql.VarChar, `Contenido generado en Cuenca #${i}`);
-              insertPromises.push(request.query(query));
-          }
-          // Ejecutamos todas las inserciones en paralelo
-          await Promise.all(insertPromises);
-          // Llamada a la funcion para sincronizar notas desde Cuenca a Guayaquil
-          const auxiliaryRemoteDB = dbPools['guayaquil'];
-          auxiliaryRemoteDB.pool.query('SELECT replicar_notas_desde_cuenca()');
-
-      } else if (sourceNode === 'quito' || sourceNode === 'guayaquil') {
-          // --- Lógica para PostgreSQL (Quito y Guayaquil) ---
-          const sequenceName = `seq_notas_${sourceNode}`;
-          const idPrefix = sourceNode === 'quito' ? 'NQ' : 'NG';
-          const nodeOriginName = sourceNode.charAt(0).toUpperCase() + sourceNode.slice(1);
-
-          // Se ejecuta el bloque DO para insertar los 10 registros.
-          const query = `
-              DO $$
-              DECLARE i INT;
-              BEGIN
-                  FOR i IN 1..10 LOOP
-                      INSERT INTO ${tableName} (NotaID, Titulo, Contenido, NodoOrigen)
-                      VALUES (
-                          '${idPrefix}' || LPAD(nextval('${sequenceName}')::TEXT, 3, '0'),
-                          'Nota desde ${nodeOriginName} #' || i,
-                          'Contenido de la nota ' || i,
-                          '${nodeOriginName}'
-                      );
-                  END LOOP;
-              END $$;
-          `;
-          await sourceDB.pool.query(query);
-
-          // Después de insertar en lote, se ejecuta el JOB en SQL Server para que "jale" los datos.
-          // Se asume que el job se llama 'ReplicarNotasDesde[NombreDelNodo]'
-          const jobName = `ReplicarNotasDesdePostgres`;
-          console.log(`Executing job: ${jobName} on SQL Server.`);
-          // Usamos la conexión de Cuenca para ejecutar un procedimiento almacenado del sistema.
-          await dbPools.cuenca.pool.request()
-              .input('job_name', sql.VarChar, jobName)
-              .execute('msdb.dbo.sp_start_job');
-
-      } else {
-          return res.status(400).json({ message: "Lógica de inserción no definida para este nodo." });
-      }
-
-      res.status(201).json({
-          message: `Se insertaron 10 notas informativas en ${sourceNode} y se inició el proceso de replicación.`
-      });
-
-  } catch (error) {
-      res.status(500).json({ message: `Error durante la inserción masiva de notas en ${sourceNode}`, error: error.message });
-  }
-};
-
-// (Aquí iría la función getReplicationStatusByNode que ya creamos para ver el estado)
 export const getReplicationStatusByNode = async (req, res) => {
   const { nodeName } = req.params;
   const dbPool = dbPools[nodeName.toLowerCase()];
@@ -225,11 +170,6 @@ export const getReplicationStatusByNode = async (req, res) => {
   }
 };
 
-/**
- * Obtener datos de tablas específicas en un nodo dado.
- * Permite verificar los datos replicados.
- */
-
 export const getTableDataByNode = async (req, res) => {
   const { nodeName, tableName } = req.params;
   const dbPool = dbPools[nodeName.toLowerCase()];
@@ -247,11 +187,11 @@ export const getTableDataByNode = async (req, res) => {
   try {
     let query = `SELECT * FROM ${tableName} ORDER BY FechaCreacion DESC`;
     if (dbPool.type === 'pg') {
-      query += ' LIMIT 30'; // Limitar resultados en PostgreSQL
+      query += ' LIMIT 30';
       const result = await dbPool.pool.query(query);
       return res.json({ data: result.rows });
     } else {
-      query += ' OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY'; // Limitar resultados en SQL Server
+      query += ' OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY';
       const result = await dbPool.pool.request().query(query);
       return res.json({ data: result.recordset });
     }

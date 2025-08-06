@@ -1,0 +1,19 @@
+meta {
+  name: Evidenciar fragmentacion horizontal por nodo
+  type: http
+  seq: 8
+}
+
+post {
+  url: http://localhost:5000/api/fragmentation-demo/horizontal-demo/:nodeSource
+  body: none
+  auth: inherit
+}
+
+params:path {
+  nodeSource: cuenca
+}
+
+settings {
+  encodeUrl: true
+}

@@ -2,6 +2,8 @@ import express from 'express';
 import dotenv from 'dotenv';
 import fragmentationRoutes from './routes/fragmentationRoutes.js';
 import replicationRoutes from './routes/replicationRoutes.js';
+import fragmentationDemoRoutes from './routes/fragmentationDemoRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
 
 // Cargar variables de entorno del archivo .env
 dotenv.config();
@@ -18,7 +20,9 @@ app.get('/api', (req, res) => {
 
 // Registrar las rutas de la aplicación
 app.use('/api/fragmentation', fragmentationRoutes);
+app.use('/api/fragmentation-demo', fragmentationDemoRoutes);
 app.use('/api/replication', replicationRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {

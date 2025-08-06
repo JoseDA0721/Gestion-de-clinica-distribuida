@@ -1,0 +1,15 @@
+meta {
+  name: Informacion para dashboard
+  type: http
+  seq: 10
+}
+
+get {
+  url: http://localhost:5000/api/dashboard/summary
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+}

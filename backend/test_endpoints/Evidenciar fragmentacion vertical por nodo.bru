@@ -1,0 +1,19 @@
+meta {
+  name: Evidenciar fragmentacion vertical por nodo
+  type: http
+  seq: 10
+}
+
+post {
+  url: http://localhost:5000/api/fragmentation-demo/vertical-demo/:nodeSource
+  body: none
+  auth: inherit
+}
+
+params:path {
+  nodeSource: guayaquil
+}
+
+settings {
+  encodeUrl: true
+}
