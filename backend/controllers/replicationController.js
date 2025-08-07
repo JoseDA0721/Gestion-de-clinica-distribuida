@@ -134,7 +134,7 @@ export const executeBidirectionalReplication = async (req, res) => {
             logs.push("-> Paso 2 completado. Funciones de replicación ejecutadas en Quito y Guayaquil.");
         } else { // quito o guayaquil
           // 1) Obtén el job_id desde el nombre
-          const jobName = `ReplicarNotasDesdePostgres`;
+          const jobName = `Replicardatos`;
           const jobInfo = await dbPools.cuenca.pool
             .request()
             .input('job_name', sql.VarChar, jobName)
